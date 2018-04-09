@@ -2,6 +2,7 @@ import adsk.core, adsk.fusion, traceback
 import os.path, sys
 import xml.etree.ElementTree as ET
 import xml.dom.minidom
+import re
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import fusion_mujoco_py
@@ -26,8 +27,7 @@ XML_TEMPLATE = """<?xml version="1.0" ?>
     <light cutoff="100" diffuse="1 1 1" dir="-0 0 -1.3" directional="true" exponent="1" pos="0 0 1.3" specular=".1 .1 .1"/>
     <geom conaffinity="1" condim="3" material="groundplanemat" name="floor" pos="0 0 0" rgba="0.8 0.9 0.8 1" size="40 40 40" type="plane"/>
   </worldbody>
-</mujoco>
-"""
+</mujoco>"""
 
 mujoco = ET.XML(XML_TEMPLATE)
 asset = mujoco[4]
@@ -36,10 +36,21 @@ assert asset.tag == 'asset'
 assert worldbody.tag == 'worldbody'
 
 def pretty_write(root, filename):
-    output = xml.dom.minidom.parseString(ET.tostring(root)).toprettyxml()
+    output = xml.dom.minidom.parseString(re.sub('\n\s*', '', str(ET.tostring(root), 'utf-8'))).toprettyxml()
     f = open(filename, 'w')
     f.write(output)
     f.close()
+
+def create_xml_body(occ):
+    xml_body = ET.Element('body')
+    xml_body.set('name', occ.component.name)
+    (origin, xAxis, yAxis, zAxis) = occ.transform.getAsCoordinateSystem()
+    [x, y, z] = origin.asArray()
+    xml_body.set('pos', '{0} {1} {2}'.format(x, y, z))
+    geom = ET.SubElement(xml_body, 'geom')
+    geom.set('type', 'mesh')
+    geom.set('mesh', occ.component.name)
+    return xml_body
 
 def run(context):
     ui = None
@@ -73,27 +84,55 @@ def run(context):
             mesh.set('file', 'stl/{0}.stl'.format(occ.component.name))
             mesh.set('scale', '0.1 0.1 0.1')
 
-            body = ET.SubElement(worldbody, 'body')
-            body.set('name', occ.component.name)
-
-            (origin, xAxis, yAxis, zAxis) = occ.transform.getAsCoordinateSystem()
-            [x, y, z] = origin.asArray()
-
-            geom = ET.SubElement(body, 'geom')
-            geom.set('type', 'mesh')
-            body.set('pos', '{0} {1} {2}'.format(x, y, z))
-            geom.set('mesh', occ.component.name)
+            # body = ET.SubElement(worldbody, 'body')
+            # body.set('name', occ.component.name)
+            # (origin, xAxis, yAxis, zAxis) = occ.transform.getAsCoordinateSystem()
+            # [x, y, z] = origin.asArray()
+            # geom = ET.SubElement(body, 'geom')
+            # geom.set('type', 'mesh')
+            # body.set('pos', '{0} {1} {2}'.format(x, y, z))
+            # geom.set('mesh', occ.component.name)
 
         # export the body one by one in the design to a specified file
-        allBodies = rootComp.bRepBodies
-        for body in allBodies:
-            stl_filename = exportDir + "/" + body.parentComponent.name + '-' + body.name
+        # allBodies = rootComp.bRepBodies
+        # for body in allBodies:
+        #     stl_filename = exportDir + "/" + body.parentComponent.name + '-' + body.name
+        #
+        #     # create stl exportOptions
+        #     stlExportOptions = exportMgr.createSTLExportOptions(body, stl_filename)
+        #     stlExportOptions.sendToPrintUtility = False
+        #
+        #     exportMgr.execute(stlExportOptions)
 
-            # create stl exportOptions
-            stlExportOptions = exportMgr.createSTLExportOptions(body, stl_filename)
-            stlExportOptions.sendToPrintUtility = False
+        # grounded_occurrence = None
+        # grounded_xml_body = None
+        xml_body_for_occ = {}
+        for occ in allOccu:
+            print(occ.transform)
+            xml_body = create_xml_body(occ)
+            xml_body_for_occ[occ.component.name] = xml_body
 
-            exportMgr.execute(stlExportOptions)
+        # Grounded component
+        for occ in allOccu:
+            if (occ.isGrounded):
+                worldbody.append(xml_body_for_occ[occ.component.name])
+
+        # Joints
+        for joint in rootComp.joints:
+            parent = xml_body_for_occ[joint.occurrenceTwo.component.name]
+            child_xml_body = xml_body_for_occ[joint.occurrenceOne.component.name]
+
+            parent_occ = joint.occurrenceTwo
+            child_occ = joint.occurrenceOne
+            (origin1, xAxis1, yAxis1, zAxis1) = parent_occ.transform.getAsCoordinateSystem()
+            (origin2, xAxis2, yAxis2, zAxis2) = child_occ.transform.getAsCoordinateSystem()
+            [x1, y1, z1] = origin1.asArray()
+            [x2, y2, z2] = origin2.asArray()
+            child_xml_body.set('pos', '{0} {1} {2}'.format(x2 - x1, y2 - y1, z2 - z1))
+
+            parent.append(child_xml_body)
+            print('1:', joint.occurrenceOne.name)
+            print('2:', joint.occurrenceTwo.name)
 
         pretty_write(mujoco, os.path.join(exportDir, '{0}.xml'.format(rootComp.name)))
 

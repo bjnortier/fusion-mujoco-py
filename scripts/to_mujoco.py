@@ -3,6 +3,7 @@ import os.path, sys
 import xml.etree.ElementTree as ET
 import xml.dom.minidom
 import re
+from math import sqrt
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -11,7 +12,7 @@ XML_TEMPLATE = """<?xml version="1.0" ?>
   <compiler angle="radian" coordinate="local" inertiafromgeom="true" settotalmass="14"/>
   <default>
     <joint armature=".1" damping=".01" limited="true" solimplimit="0 .8 .03" solreflimit=".02 1" stiffness="8" range="-3.1415926536 3.1415926536" />
-    <geom conaffinity="0" condim="3" contype="1" friction=".4 .1 .1" rgba="0.8 0.6 .4 1" solimp="0.0 0.8 0.01" solref="0.02 1"/>
+    <geom rgba="0.2 0.8 0.2 1" />
     <site type="sphere" rgba=".9 .9 .9 1" size="0.1"/>
     <motor ctrllimited="true" ctrlrange="-1 1"/>
   </default>
@@ -28,15 +29,18 @@ XML_TEMPLATE = """<?xml version="1.0" ?>
     <geom conaffinity="1" condim="3" material="groundplanemat" name="floor" pos="0 0 -5" rgba="0.8 0.9 0.8 1" size="40 40 40" type="plane"/>
   </worldbody>
   <tendon />
+  <actuator />
 </mujoco>"""
 
 mujoco = ET.XML(XML_TEMPLATE)
 asset = mujoco[4]
 worldbody = mujoco[5]
 tendon = mujoco[6]
+actuator = mujoco[7]
 assert asset.tag == 'asset'
 assert worldbody.tag == 'worldbody'
 assert tendon.tag == 'tendon'
+assert actuator.tag == 'actuator'
 
 def pretty_write(root, filename):
     output = xml.dom.minidom.parseString(re.sub('\n\s*', '', str(ET.tostring(root), 'utf-8'))).toprettyxml()
@@ -51,7 +55,6 @@ def create_xml_body(occ):
     [x, y, z] = origin.asArray()
     xml_body.set('pos', '{0} {1} {2}'.format(x, y, z))
     geom = ET.SubElement(xml_body, 'geom')
-    geom.set('rgba', '0.2 0.8 0.2 0.5')
     geom.set('type', 'mesh')
     geom.set('mesh', occ.component.name)
     # for joint_origin in occ.component.jointOrigins:
@@ -146,26 +149,47 @@ def run(context):
                     joint_xml.set('type', 'hinge')
 
 
-        # Links/Tendons
+        # Tendons sites
+        link_positions = {}
         for joint in rootComp.joints:
             # Model "links" as "tendons" in mujoco
             if re.match('__Link__.*', joint.occurrenceOne.component.name):
+                link_name = joint.occurrenceOne.component.name
+                if not link_positions.get(link_name):
+                    link_positions[link_name] = []
                 # print('1', joint.occurrenceOne.component.name, joint.geometryOrOriginOne.origin.asArray())
                 # print('2', joint.occurrenceTwo.component.name, joint.geometryOrOriginTwo.origin.asArray())
                 [x1, y1, z1] = joint.geometryOrOriginOne.origin.asArray()
-                print('!!', [x1, x1, z1])
                 (origin2, xAxis2, yAxis2, zAxis2) = joint.occurrenceTwo.transform.getAsCoordinateSystem()
                 [x2, y2, z2] = origin2.asArray()
                 site_parent = xml_body_for_occ[joint.occurrenceTwo.component.name]
                 site = ET.SubElement(site_parent, 'site')
-                site.set('name', '{0}:{1}'.format(joint.occurrenceTwo.component.name, joint.occurrenceOne.component.name))
+                site_name = '{0}:{1}'.format(joint.occurrenceTwo.component.name, joint.occurrenceOne.component.name)
+                site.set('name', site_name)
                 site.set('pos',  '{0} {1} {2}'.format(x1 - x2, y1 - y2, z1 - z2))
+                link_positions[link_name].append((site_name, [x1, y1, z1]))
+            if re.match('__Motor__.*', joint.name):
+                motor_xml = ET.SubElement(actuator, 'motor')
+                motor_xml.set('gear', '100')
+                motor_xml.set('joint', joint.name)
 
-        # Tendon sites:
-        # for occ in allOccu:
-        #     re.match('Link', occ.component.name):
-        #         fixed = ET.SubElement(tendon, 'spacial')
-        #         fixed.set('')
+
+        # Links/Tendons
+        for occ in allOccu:
+            if re.match('__Link__.*', occ.component.name):
+                link_name = occ.component.name
+                spatial = ET.SubElement(tendon, 'spatial')
+                spatial.set('limited', 'true')
+                spatial.set('width', '0.1')
+                p0 = link_positions[link_name][0][1]
+                p1 = link_positions[link_name][1][1]
+                link_length = sqrt((p0[0] - p1[0])**2 + (p0[1] - p1[1])**2 + (p0[2] - p1[2])**2)
+                spatial.set('range', '5.49 5.51')
+                assert len(link_positions[link_name]) == 2
+                site1 = ET.SubElement(spatial, 'site')
+                site1.set('site', link_positions[link_name][0][0])
+                site2 = ET.SubElement(spatial, 'site')
+                site2.set('site', link_positions[link_name][1][0])
 
         pretty_write(mujoco, os.path.join(exportDir, '{0}.xml'.format(rootComp.name)))
 

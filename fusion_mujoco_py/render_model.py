@@ -13,7 +13,6 @@ model = load_model_from_path(args.file)
 sim = MjSim(model)
 viewer = MjViewer(sim)
 t = 0
-dir = -1
 while True:
 #     t += 1
     # if sim.data.qpos[0] > math.pi/8:

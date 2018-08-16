@@ -110,11 +110,18 @@ def append_root_join_elements(body):
     joint.set('type', 'hinge')
     body.append(joint)
 
+def rescale(arr):
+    [x, y, z] = arr
+    x *= 10
+    y *= 10
+    z *= 10
+    return [round(x, 3), round(y, 3), round(z, 3)]
+
 def create_xml_body(occ):
     xml_body = ET.Element('body')
     xml_body.set('name', occ.component.name)
     (origin, xAxis, yAxis, zAxis) = occ.transform.getAsCoordinateSystem()
-    [x, y, z] = origin.asArray()
+    [x, y, z] = rescale(origin.asArray())
     xml_body.set('pos', '{0} {1} {2}'.format(round(x, 3), round(y, 3), round(z, 3)))
     geom = ET.SubElement(xml_body, 'geom')
     geom.set('type', 'mesh')
@@ -132,11 +139,18 @@ def run(context):
         mujoco.set('model', rootComp.name)
         exportMgr = design.exportManager
         exportDir = os.path.join(os.path.expanduser('~'), 'fusion-mujoco-export')
-        print('exportdir:', exportDir)
+
+        legRadius = design.userParameters.itemByName('LegRadius')
+        ### Some really flippen weird Fusion 360 behaviour happening here
+        ### Joint origin seem to be very buggy or have bizarre behaviour
+        ### This is a fudge to get the correct joint origins
+        leg_radius = legRadius.value * 10
 
         # export the occurrence one by one in the root component to a specified file
         allOccu = rootComp.allOccurrences
         for occ in allOccu:
+            if not occ.isVisible:
+                continue
             stl_filename = os.path.join(exportDir, 'stl', occ.component.name)
             stlExportOptions = exportMgr.createSTLExportOptions(occ, stl_filename)
             stlExportOptions.sendToPrintUtility = False
@@ -149,23 +163,29 @@ def run(context):
 
         xml_body_for_occ = {}
         for occ in allOccu:
+            # if not occ.isVisible:
+            #     continue
             xml_body = create_xml_body(occ)
             xml_body_for_occ[occ.component.name] = xml_body
 
         # Grounded component in Fusion 360 = Root components in Mujoco.
         # There can be only one
-        found = False
+        # found = False
         for occ in allOccu:
-            if (occ.isGrounded):
-                assert found == False
-                root_body = xml_body_for_occ[occ.component.name]
-                append_root_join_elements(root_body)
-                worldbody.append(root_body)
-                found = True
-            else:
+            # assert found == False
+            if (occ.isVisible):
+                body = xml_body_for_occ[occ.component.name]
+                print(body.get('name'), body.get('pos'))
+                if (occ.isGrounded):
+                    # append_root_join_elements(root_body)
+                    # marker = ET.fromstring('<body pos="0 0 0"><geom pos="0 0 0" type="sphere" size="2" rgba="1.0 0 1.0 1"/></body>'.format(body.get('pos')))
+                    # body.append(marker)
+                    worldbody.append(body)
+            # found = True
+            # else:
                 # (origin, xAxis, yAxis, zAxis) = occ.transform.getAsCoordinateSystem()
                 # [x, y, z] = .asArray()
-                print(occ.component.name, occ.transform.translation.x, occ.transform.translation.y, occ.transform.translation.z)
+                # print(occ.component.name, occ.transform.translation.x, occ.transform.translation.y, occ.transform.translation.z)
                 # print(occ.transform.scale)
         #
         # Joints
@@ -179,42 +199,35 @@ def run(context):
 
             (origin1, xAxis1, yAxis1, zAxis1) = parent_occ.transform.getAsCoordinateSystem()
             (origin2, xAxis2, yAxis2, zAxis2) = child_occ.transform.getAsCoordinateSystem()
-            [x1, y1, z1] = origin1.asArray()
-            [x2, y2, z2] = origin2.asArray()
-            x1 *= 10
-            y1 *= 10
-            z1 *= 10
-            x2 *= 10
-            y2 *= 10
-            z2 *= 10
+            [parent_x, parent_y, parent_z] = rescale(origin1.asArray())
+            [child_x, child_y, child_z] = rescale(origin2.asArray())
 
-            local_x = x2 - x1
-            local_y = y2 - y1
-            local_z = z2 - z1
-            # print('xAxis', xAxis2.asArray())
-            # print('yAxis', yAxis2.asArray())
-            # print('zAxis', zAxis2.asArray())
-            # print('parent', x1, y1, z1, 'child', x2, y2, z2)
-            child_xml_body.set('pos', '{0} {1} {2}'.format(round(local_x, 3), round(local_y, 3), round(local_z, 3)))
+            # print('----- joint', joint.name, '-----')
+            # print('parent', parent_x, parent_y, parent_z)
+            # print('child', child_x, child_y, child_z)
+
+            local_x = child_x - parent_x
+            local_y = child_y - parent_y
+            local_z = child_z - parent_z
+        #     # print('xAxis', xAxis2.asArray())
+        #     # print('yAxis', yAxis2.asArray())
+        #     # print('zAxis', zAxis2.asArray())
+        #     print('parent', parent_x, parent_y, parent_z)
+        #     print('child', child_x, child_y, child_z)
+        #     child_xml_body.set('pos', '{0} {1} {2}'.format(round(local_x, 3), round(local_y, 3), round(local_z, 3)))
             parent.append(child_xml_body)
-
-            # Fusion Revolute joint create Mujoco Hinge joints
+        #
+        #     # Fusion Revolute joint create Mujoco Hinge joints
             if joint.jointMotion.jointType == 1:
-                print('----- 1:', joint.occurrenceOne.name, '>> 2:', joint.occurrenceTwo.name, '-----')
-                print('1:', joint.geometryOrOriginOne.origin.asArray())
-                [x, y, z] = joint.geometryOrOriginOne.origin.asArray()
-                x *= 10
-                y *= 10
-                z *= 10
+                [joint_x1, joint_y1, joint_z1] = rescale(joint.geometryOrOriginOne.origin.asArray())
+                # print('1:', joint.occurrenceOne.name, joint_x1, joint_y1, joint_z1)
                 joint_xml = ET.SubElement(child_xml_body, 'joint')
                 joint_xml.set('axis', '{0} {1} {2}'.format(*joint.geometryOrOriginOne.primaryAxisVector.asArray()))
                 joint_xml.set('name', '{0}'.format(joint.name))
-                radius = 10
-                mujuco_joint_pos = '{0} {1} {2}'.format(round(x - local_x - radius, 3), round(y - local_y, 3), round(z - local_z, 3))
+                mujuco_joint_pos = '{0} {1} {2}'.format(round(joint_x1 - local_x - leg_radius, 3), round(joint_y1 - local_y, 3), round(joint_z1 - local_z, 3))
                 joint_xml.set('pos', mujuco_joint_pos)
                 joint_xml.set('type', 'hinge')
-
-                marker = ET.fromstring('<body pos="{0}"><geom pos="0 0 0" type="sphere" size="5" rgba="1.0 1.0 1.0 1"/></body>'.format(mujuco_joint_pos))
+                marker = ET.fromstring('<body pos="{0}"><geom pos="0 0 0" type="sphere" size="2" rgba="0 1.0 1.0 1"/></body>'.format(mujuco_joint_pos))
                 child_xml_body.append(marker)
         #
         #

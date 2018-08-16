@@ -177,7 +177,7 @@ def run(context):
                 body = xml_body_for_occ[occ.component.name]
                 print(body.get('name'), body.get('pos'))
                 if (occ.isGrounded):
-                    # append_root_join_elements(root_body)
+                    append_root_join_elements(body)
                     # marker = ET.fromstring('<body pos="0 0 0"><geom pos="0 0 0" type="sphere" size="2" rgba="1.0 0 1.0 1"/></body>'.format(body.get('pos')))
                     # body.append(marker)
                     worldbody.append(body)

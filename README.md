@@ -2,7 +2,9 @@
 
 ## Getting Started
 
-    $ python -m venv .env
-    $ source .env/bin/activate
-    $ make init
-    $ make test
+```
+$ python -m venv .env
+$ source .env/bin/activate
+$ make init
+$ make test
+```

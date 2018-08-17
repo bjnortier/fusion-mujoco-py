@@ -1,3 +1,1 @@
-def get_answer():
-    """Get an answer."""
-    return True
+import adsk.core, adsk.fusion, traceback
